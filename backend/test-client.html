@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>PulseStream - Live WebSocket Test</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 600px;
+        margin: 40px auto;
+        padding: 20px;
+        line-height: 1.5;
+      }
+      .card {
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }
+      .status {
+        font-weight: bold;
+        padding: 4px 8px;
+        border-radius: 4px;
+      }
+      .alert {
+        padding: 12px;
+        margin-top: 12px;
+        border-radius: 6px;
+        border-left: 4px solid;
+        animation: slideIn 0.3s ease;
+      }
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(-8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+  </head>
+  <body>
+    <div class="card">
+      <h2>⚡ PulseStream Real-Time Client</h2>
+      <p>
+        Connection Status: <span id="status" class="status">Connecting...</span>
+      </p>
+      <p>Registered User ID: <code>111111111111111111111111</code></p>
+      <hr />
+      <h3>Live Inbox Alerts</h3>
+      <div id="notifications">
+        <em>Waiting for incoming events...</em>
+      </div>
+    </div>
+
+    <script>
+      // 1. Connect to your local Express + Socket.io server
+      const socket = io("http://localhost:5000");
+      const statusEl = document.getElementById("status");
+      const notifContainer = document.getElementById("notifications");
+      const TEST_USER_ID = "111111111111111111111111";
+
+      socket.on("connect", () => {
+        statusEl.textContent = "● Connected (Online)";
+
+        // 2. Register our User ID so the server knows where to beam alerts
+        socket.emit("register", TEST_USER_ID);
+        console.log("Registered Socket for User:", TEST_USER_ID);
+      });
+
+      socket.on("disconnect", () => {
+        statusEl.textContent = "○ Disconnected (Offline)";
+      });
+
+      // 3. Listen for the 'new_notification' event emitted by inapp.worker.ts
+      socket.on("new_notification", (data) => {
+        console.log("⚡ Received Live Alert:", data);
+
+        if (notifContainer.querySelector("em")) notifContainer.innerHTML = "";
+
+        const div = document.createElement("div");
+        div.className = "alert";
+        div.innerHTML = `<strong>🔔 ${data.message}</strong><br><small>Payload: ${JSON.stringify(data.payload)}</small>`;
+        notifContainer.prepend(div);
+      });
+    </script>
+  </body>
+</html>
