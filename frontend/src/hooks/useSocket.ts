@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
-const SOCKET_URL = "http://localhost:5000";
+const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export const useSocket = (userId: string = "") => {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -22,7 +22,6 @@ export const useSocket = (userId: string = "") => {
         `⚡ WebSocket Connected & Registered Persona ID: "${userId}"`,
       );
 
-      // 🚀 UPGRADE: Auto-Sync Missed Notifications!
       // If the user's Wi-Fi dropped, fetch what they missed while offline.
       try {
         console.log("🔄 Syncing latest notifications from database...");

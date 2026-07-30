@@ -68,7 +68,9 @@ export default function App() {
 
     // 2. Tell MongoDB to permanently delete them
     try {
-      await fetch(`http://localhost:5000/api/notifications/clear/${userId}`, {
+      const backendUrl =
+        import.meta.env.VITE_API_URL || "http://localhost:5000";
+      await fetch(`${backendUrl}/api/notifications/clear/${userId}`, {
         method: "DELETE",
       });
       console.log("✅ Notifications permanently deleted from MongoDB!");
