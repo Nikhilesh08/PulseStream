@@ -21,7 +21,8 @@ export const sendEmail = async (
 ): Promise<boolean> => {
   try {
     const info = await transporter.sendMail({
-      from: `"PulseStream Alerts" <${process.env.SMTP_USER}>`,
+      // 🚀 ENTERPRISE UPGRADE: Displays professional "no-reply" sender notation
+      from: `"PulseStream Alerts <no-reply>" <${process.env.SMTP_USER}>`,
       to,
       subject,
       html: htmlContent,

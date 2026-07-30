@@ -61,20 +61,22 @@ export const Navbar = ({
               Shopper Portal
             </button>
 
-            {/* RBAC LOCKDOWN: Only render Admin Command Center if logged in as Master Test Admin! */}
-            {currentUser && currentUser.email === "test@pulsestream.io" && (
-              <button
-                onClick={() => setActiveTab("admin")}
-                className={`flex items-center px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  activeTab === "admin"
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
-                    : "text-slate-400 hover:text-white hover:bg-slate-700/50"
-                }`}
-              >
-                <Shield className="h-3.5 w-3.5 mr-1.5" />
-                Admin Command Center
-              </button>
-            )}
+            {/* RBAC LOCKDOWN: Grant Admin access to your real email! */}
+            {currentUser &&
+              (currentUser.email === "test@pulsestream.io" ||
+                currentUser.email === "nikhileshkumar317@gmail.com") && (
+                <button
+                  onClick={() => setActiveTab("admin")}
+                  className={`flex items-center px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    activeTab === "admin"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      : "text-slate-400 hover:text-white hover:bg-slate-700/50"
+                  }`}
+                >
+                  <Shield className="h-3.5 w-3.5 mr-1.5" />
+                  Admin Command Center
+                </button>
+              )}
           </div>
 
           {/* Right Controls: WiFi Health & Notification Bell */}

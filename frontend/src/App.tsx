@@ -33,15 +33,47 @@ export default function App() {
     productId: string,
     channel: "inApp" | "email",
   ) => {
-    if (!userId) return;
+    console.log(
+      "🚨 1. UI Toggle Clicked! UserId:",
+      userId,
+      "Product:",
+      productId,
+    );
+
+    if (!userId) {
+      console.error(
+        "🚨 ABORTING: No User ID found in React state! The API call was cancelled.",
+      );
+      return;
+    }
+
     try {
+      console.log("🚨 2. Firing Axios Request to Backend...");
       const res = await updateWatchlist(userId, productId, channel);
+      console.log("🚨 3. Backend Response Received:", res.data);
       if (res.data && res.data.data) {
         setCurrentUser(res.data.data);
       }
     } catch (err) {
-      console.error("Failed to update MongoDB:", err);
+      console.error("🚨 4. Failed to update MongoDB:", err);
       throw err;
+    }
+  };
+
+  const handleClearNotifications = async () => {
+    if (!userId) return;
+
+    // 1. Instantly clear the UI so it feels fast for the user (Optimistic UI)
+    setNotifications([]);
+
+    // 2. Tell MongoDB to permanently delete them
+    try {
+      await fetch(`http://localhost:5000/api/notifications/clear/${userId}`, {
+        method: "DELETE",
+      });
+      console.log("✅ Notifications permanently deleted from MongoDB!");
+    } catch (error) {
+      console.error("❌ Failed to delete notifications from database", error);
     }
   };
 
@@ -62,7 +94,7 @@ export default function App() {
       <Navbar
         isConnected={isConnected}
         notifications={notifications}
-        onClearNotifications={() => setNotifications([])}
+        onClearNotifications={handleClearNotifications}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         currentUser={currentUser}

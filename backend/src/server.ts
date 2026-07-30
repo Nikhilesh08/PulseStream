@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import path from "path";
-// 🔒 SECURITY FIX: Load environment variables BEFORE importing ANY custom routes or files!
+
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 import express, { Application, Request, Response } from "express";
@@ -9,9 +9,11 @@ import cors from "cors";
 import bcrypt from "bcryptjs";
 import { connectDB } from "./config/db";
 import "./config/redis";
-import "./workers/fanout.worker";
-import "./workers/inapp.worker";
-import "./workers/email.worker";
+
+import { fanoutWorker } from "./workers/fanout.worker";
+import { inAppWorker } from "./workers/inapp.worker";
+import { emailWorker } from "./workers/email.worker";
+
 import authRoutes from "./routes/auth";
 import userRoutes from "./routes/users";
 import User from "./models/User";
@@ -40,8 +42,8 @@ app.get("/health", (req: Request, res: Response) => {
 });
 
 // Mount API routes
-app.use("/api/auth", authRoutes); // <-- NEW: Mounted real authentication!
-app.use("/api/users", userRoutes); // Mounted Dynamic User Watchlist API!
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api", notificationRoutes);
 app.use("/api/analytics", analyticsRoutes);
 
@@ -50,32 +52,23 @@ const startServer = async () => {
   try {
     await connectDB();
 
-    // <-- NEW: Auto-seed the Master Test User with ALL products subscribed!
-    // We check by email so it generates even if other users already exist in your DB.
-    const testEmail = "test@pulsestream.io";
-    const existingMaster = await User.findOne({ email: testEmail });
+    const masterEmail = "nikhileshkumar317@gmail.com";
+    const existingMaster = await User.findOne({ email: masterEmail });
 
     if (!existingMaster) {
       const hashedPassword = await bcrypt.hash("test1234", 10);
       await User.create({
-        name: "Master Test User",
-        email: testEmail,
+        name: "Nikhilesh Kumar Gubba", // Updated to official profile format
+        email: masterEmail,
         password: hashedPassword,
-        avatar: "🔥",
-        subscriptions: [
-          { productId: "prod_1", inApp: true, email: true },
-          { productId: "prod_2", inApp: true, email: true },
-          { productId: "prod_3", inApp: true, email: true },
-          { productId: "prod_4", inApp: true, email: true },
-          { productId: "prod_5", inApp: true, email: true },
-        ],
+        avatar: "👤",
       });
-      console.log(
-        "🔥 Seeded Master Test User (test@pulsestream.io / pass: test1234) with ALL products subscribed!",
-      );
+      console.log(`🔥 Seeded Master Test User (${masterEmail})!`);
+    } else {
+      console.log(`✅ Master Test User (${masterEmail}) verified in database.`);
     }
 
-    // 5. IMPORTANT: Listen using httpServer instead of app.listen!
+    // IMPORTANT: Listen using httpServer instead of app.listen!
     httpServer.listen(PORT, () => {
       console.log(`🚀 Server & WebSockets running on http://localhost:${PORT}`);
     });
@@ -86,3 +79,23 @@ const startServer = async () => {
 };
 
 startServer();
+
+// This catches "Ctrl+C" (SIGINT) or server restarts (SIGTERM) and pauses workers safely
+const gracefulShutdown = async () => {
+  console.log(
+    "\n🛑 Shutting down safely. Waiting for active jobs to finish...",
+  );
+
+  // Stop accepting new jobs and wait for current ones to complete
+  await fanoutWorker.close();
+  await emailWorker.close();
+  await inAppWorker.close();
+
+  httpServer.close(() => {
+    console.log("✅ Server and workers safely closed.");
+    process.exit(0);
+  });
+};
+
+process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", gracefulShutdown);

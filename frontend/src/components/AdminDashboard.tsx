@@ -39,7 +39,8 @@ export const AdminDashboard: React.FC = () => {
         fetchFailures(),
       ]);
       setMetrics(metricsRes.data);
-      setFailures(failuresRes.data);
+      // Ensure we bind the array of failures properly based on the backend response
+      setFailures(Array.isArray(failuresRes.data) ? failuresRes.data : []);
     } catch (err) {
       console.error("Error fetching admin data:", err);
     } finally {
@@ -70,7 +71,6 @@ export const AdminDashboard: React.FC = () => {
 
       if (isPriceDrop) {
         await triggerTestEvent({
-          // 🐛 THE FIX: Align the event trigger to use the product ID ("prod_1") instead of the old hardcoded topicId
           topicId: product.id,
           type: "price_drop",
           payload: {
@@ -81,7 +81,8 @@ export const AdminDashboard: React.FC = () => {
             currency: "USD",
           },
         });
-        await loadData();
+        // Wait 1 second to give the queue time to process, then force a UI refresh
+        setTimeout(loadData, 1000);
       }
     } catch (err) {
       console.error("Failed to trigger automated alert:", err);
@@ -106,6 +107,12 @@ export const AdminDashboard: React.FC = () => {
     } finally {
       setRetryingId(null);
     }
+  };
+
+  // Safely extract the failure type for the table display
+  const getFaultType = (item: any) => {
+    const rawType = item.faultType || item.errorType || "UNKNOWN_ERROR";
+    return rawType.toString().replaceAll("_", " ");
   };
 
   return (
@@ -308,23 +315,23 @@ export const AdminDashboard: React.FC = () => {
                     <td className="py-4 px-6">
                       <span
                         className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                          item.faultType === "USER_QUOTA_EXCEEDED" ||
-                          item.faultType === "INVALID_EMAIL_ADDRESS"
+                          getFaultType(item).includes("USER QUOTA EXCEEDED") ||
+                          getFaultType(item).includes("INVALID EMAIL ADDRESS")
                             ? "bg-amber-100 text-amber-800 border border-amber-300"
                             : "bg-rose-100 text-rose-800 border border-rose-300"
                         }`}
                       >
-                        {item.faultType.replaceAll("_", " ")}
+                        {getFaultType(item)}
                       </span>
                     </td>
                     <td
                       className="py-4 px-6 font-mono text-xs text-rose-600 max-w-xs truncate"
                       title={item.errorMessage}
                     >
-                      {item.errorMessage}
+                      {item.errorMessage || "Unknown queue processing error"}
                     </td>
                     <td className="py-4 px-6 text-right">
-                      {item.actionable ? (
+                      {item.actionable !== false ? (
                         <button
                           onClick={() => handleRetryJob(item._id)}
                           disabled={retryingId === item._id}

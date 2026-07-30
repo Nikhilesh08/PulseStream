@@ -1,18 +1,16 @@
 import { Queue, Worker, Job } from "bullmq";
 import { redisConnection } from "../config/redis";
 import { Follow } from "../models/Follow";
+import { Delivery } from "../models/Delivery";
+import User from "../models/User"; // 🚀 ADDED: Import User model to verify followers
 import { emailQueue } from "../queues/email.queue";
-import { inAppQueue } from "../queues/inapp.queue"; // ✅ Fixed: Capital "A"
+import { inAppQueue } from "../queues/inapp.queue";
 
-// Instantiate our primary fan-out queue using our existing Upstash Redis connection
 export const fanoutQueue = new Queue("fanout-queue", {
   connection: redisConnection,
   defaultJobOptions: {
     attempts: 3,
-    backoff: {
-      type: "exponential",
-      delay: 1000,
-    },
+    backoff: { type: "exponential", delay: 1000 },
     removeOnComplete: true,
     removeOnFail: false,
   },
@@ -20,31 +18,70 @@ export const fanoutQueue = new Queue("fanout-queue", {
 
 console.log('📦 BullMQ "fanout-queue" is ready to receive jobs!');
 
-// The Worker that actually processes the background jobs
 export const fanoutWorker = new Worker(
   "fanout-queue",
   async (job: Job) => {
     const { eventId, topicId, type, payload } = job.data;
     console.log(`[Fanout Worker] Processing event for topic: ${topicId}`);
 
-    // Search the Follow collection using the STRING topicId
     const followers = await Follow.find({ topicId: String(topicId) }).lean();
-
     console.log(`[Fanout Worker] Found ${followers.length} active followers!`);
 
-    // Route the payloads to the correct notification queues
     for (const follower of followers) {
+      // 🚀 THE BOUNCER: Check if the user actually still exists in MongoDB!
+      const userExists = await User.exists({ _id: follower.userId });
+      if (!userExists) {
+        console.warn(
+          `🧹 [Fanout Worker]: Found orphaned follow for deleted User ID ${follower.userId}. Auto-cleaning...`,
+        );
+        await Follow.deleteMany({ userId: follower.userId }); // Automatically deletes the ghost subscription!
+        continue; // Skips creating any jobs or Delivery receipts for this deleted user!
+      }
+
+      // --- 1. EMAIL CHANNEL ---
       if (follower.channels.includes("email")) {
+        try {
+          if (eventId) {
+            await Delivery.findOneAndUpdate(
+              { eventId: eventId, userId: follower.userId, channel: "email" },
+              { status: "pending", attempts: 0 },
+              { upsert: true, new: true },
+            );
+          }
+        } catch (dbErr) {
+          console.error(
+            "Failed to create pending email delivery record:",
+            dbErr,
+          );
+        }
+
         await emailQueue.add("send-email", {
+          eventId,
           userId: follower.userId,
           type,
           payload,
         });
       }
 
+      // --- 2. IN-APP CHANNEL ---
       if (follower.channels.includes("inApp")) {
+        try {
+          if (eventId) {
+            await Delivery.findOneAndUpdate(
+              { eventId: eventId, userId: follower.userId, channel: "inApp" },
+              { status: "pending", attempts: 0 },
+              { upsert: true, new: true },
+            );
+          }
+        } catch (dbErr) {
+          console.error(
+            "Failed to create pending inApp delivery record:",
+            dbErr,
+          );
+        }
+
         await inAppQueue.add("send-inapp", {
-          // ✅ Fixed: Capital "A"
+          eventId,
           userId: follower.userId,
           type,
           payload,

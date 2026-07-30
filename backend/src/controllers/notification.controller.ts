@@ -1,11 +1,123 @@
 import { Request, Response } from "express";
-import { fanoutQueue } from "../queues/fanout.queue";
-import { Topic } from "../models/Topic";
-import { Follow } from "../models/Follow";
 import { Event } from "../models/Event";
+import { Follow } from "../models/Follow";
 import { Notification } from "../models/Notification";
+import { Topic } from "../models/Topic";
+import { fanoutQueue } from "../workers/fanout.worker";
 
-// 1. Create a new topic (e.g., "iPhone 16 Price Drop")
+// 1. TRIGGER EVENT (The missing link for the Dashboard Analytics!)
+export const triggerEvent = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { topicId, type, payload } = req.body;
+
+    if (!topicId || !type || !payload) {
+      res
+        .status(400)
+        .json({ error: "topicId, type, and payload are required" });
+      return;
+    }
+
+    const safeTopicId = String(topicId);
+
+    const newEvent = await Event.create({
+      topicId: safeTopicId,
+      type,
+      payload,
+    });
+
+    console.log(`✅ Official Event Created in DB with ID: ${newEvent._id}`);
+
+    // Without this, the workers have no idea what to attach their success/fail logs to.
+    await fanoutQueue.add("process-event", {
+      eventId: newEvent._id, // <--- THIS IS THE MAGIC KEY FOR THE DASHBOARD
+      topicId: safeTopicId,
+      type: newEvent.type,
+      payload: newEvent.payload,
+    });
+
+    console.log(
+      `📦 [BullMQ]: Job pushed to 'fanout-queue' for Event ID ${newEvent._id}`,
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Event accepted and queued for background processing!",
+      event: newEvent,
+    });
+  } catch (error: any) {
+    console.error("🚨 Failed to trigger event:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 2. GET USER NOTIFICATIONS (For the in-app bell icon)
+export const getNotifications = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { userId } = req.params;
+    const notifications = await Notification.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(50); // Keep it fast, only fetch recent 50
+
+    res.status(200).json({ success: true, data: notifications });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 3. FOLLOW A TOPIC (Opt-in to notifications)
+export const followTopic = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { userId, topicId, channels } = req.body;
+
+    if (!userId || !topicId || !channels || !Array.isArray(channels)) {
+      res.status(400).json({
+        error: "userId, topicId, and an array of channels are required",
+      });
+      return;
+    }
+
+    const follow = await Follow.findOneAndUpdate(
+      { userId, topicId: String(topicId) },
+      { channels },
+      { upsert: true, new: true },
+    );
+
+    res.status(200).json({ success: true, data: follow });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 4. UNFOLLOW A TOPIC (Opt-out)
+export const unfollowTopic = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const deletedFollow = await Follow.findByIdAndDelete(id);
+
+    if (!deletedFollow) {
+      res.status(404).json({ error: "Follow subscription not found" });
+      return;
+    }
+
+    res.status(200).json({ success: true, message: "Unfollowed successfully" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 5. CREATE A TOPIC (Optional/Admin)
 export const createTopic = async (
   req: Request,
   res: Response,
@@ -27,117 +139,6 @@ export const createTopic = async (
       res.status(400).json({ error: "A topic with this name already exists" });
       return;
     }
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// 2. Follow a topic with specific notification channels
-export const followTopic = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  try {
-    const { userId, topicId, channels } = req.body;
-
-    if (!userId || !topicId || !channels || !Array.isArray(channels)) {
-      res.status(400).json({
-        error: "userId, topicId, and an array of channels are required",
-      });
-      return;
-    }
-
-    const follow = new Follow({ userId, topicId: String(topicId), channels });
-    await follow.save();
-
-    res.status(201).json({ message: "Topic followed successfully", follow });
-  } catch (error: any) {
-    if (error.code === 11000) {
-      res.status(400).json({ error: "User is already following this topic" });
-      return;
-    }
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// 3. Unfollow a topic
-export const unfollowTopic = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const deletedFollow = await Follow.findByIdAndDelete(id);
-
-    if (!deletedFollow) {
-      res.status(404).json({ error: "Follow subscription not found" });
-      return;
-    }
-
-    res.status(200).json({ message: "Unfollowed successfully" });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// 4. Trigger an event (Phase 2: Asynchronous push to BullMQ)
-export const triggerEvent = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  try {
-    const { topicId, type, payload } = req.body;
-
-    if (!topicId || !type || !payload) {
-      res
-        .status(400)
-        .json({ error: "topicId, type, and payload are required" });
-      return;
-    }
-
-    // Safely enforce topicId as a String
-    const safeTopicId = String(topicId);
-
-    // Save the event to the database
-    const event = new Event({ topicId: safeTopicId, type, payload });
-    await event.save();
-
-    // 🔥 PHASE 2 UPGRADE: Push job onto BullMQ conveyor belt!
-    await fanoutQueue.add("process-fanout", {
-      eventId: event._id,
-      topicId: safeTopicId,
-      type: event.type,
-      payload: event.payload,
-    });
-
-    console.log(
-      `📦 [BullMQ]: Job pushed to 'fanout-queue' for Event ID ${event._id}`,
-    );
-
-    res.status(201).json({
-      message: "Event accepted and queued for background processing!",
-      event,
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// 5. Fetch a user's in-app notification inbox
-export const getNotifications = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  try {
-    const { userId } = req.params;
-
-    const notifications = await Notification.find({
-      userId: userId as any,
-    }).sort({
-      createdAt: -1,
-    });
-
-    res.status(200).json(notifications);
-  } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 };

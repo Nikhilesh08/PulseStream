@@ -36,3 +36,8 @@ export const loginUser = (email: string, password: string) =>
 export const signupUser = (name: string, email: string, password: string) =>
   api.post("/auth/signup", { name, email, password });
 export const fetchCurrentUser = () => api.get("/auth/me");
+
+// 🚀 GOD MODE: Arm all notifications for the Master User
+export const armMasterUser = async (userId: string, productIds: string[]) => {
+  return axios.post(`${API_URL}/users/${userId}/arm-all`, { productIds });
+};
