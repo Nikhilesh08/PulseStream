@@ -6,12 +6,12 @@ let io: Server | null = null;
 export const initializeSocket = (httpServer: HttpServer): Server => {
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.FRONTEND_URL || "http://localhost:5173",
+      // UPDATED: Accepts an array so both local development and Vercel production work automatically!
+      origin: [process.env.FRONTEND_URL || "", "http://localhost:5173"],
       methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
       credentials: true,
     },
   });
-  // ... keep the rest of the connection logic exactly the same
 
   io.on("connection", (socket: Socket) => {
     console.log(
