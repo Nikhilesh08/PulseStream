@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { fetchNotifications } from "../services/api";
 
@@ -11,6 +11,12 @@ export const useSocket = (userId = "") => {
   const [isConnected, setIsConnected] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
+  const userIdRef = useRef(userId);
+
+  useEffect(() => {
+    userIdRef.current = userId;
+  }, [userId]);
+
   useEffect(() => {
     if (!userId) {
       setSocket(null);
@@ -20,32 +26,72 @@ export const useSocket = (userId = "") => {
     }
 
     const token = localStorage.getItem("token");
+
     if (!token) {
       setSocket(null);
       setIsConnected(false);
-      setNotifications([]);
       return undefined;
     }
 
+    console.log(
+      `[Socket] Creating connection for user ${userId} -> ${SOCKET_URL}`,
+    );
+
     const socketInstance = io(SOCKET_URL, {
       transports: ["websocket", "polling"],
-      auth: { token },
+      auth: {
+        token,
+      },
+
+      // Explicit reconnection configuration.
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5000,
+      randomizationFactor: 0.5,
+
+      timeout: 10000,
+
+      // Prevent an old connection from being reused incorrectly.
+      forceNew: true,
     });
 
-    const handleConnect = async () => {
-      setIsConnected(true);
+    const syncNotifications = async () => {
       try {
-        const response = await fetchNotifications(userId);
-        const fetchedNotifs = response.data?.data;
-        if (Array.isArray(fetchedNotifs)) {
-          setNotifications(fetchedNotifs);
+        const response = await fetchNotifications(userIdRef.current);
+
+        const serverNotifications =
+          response?.data?.data ?? response?.data ?? [];
+
+        if (Array.isArray(serverNotifications)) {
+          setNotifications(serverNotifications.slice(0, 50));
         }
       } catch (error) {
         console.warn(
-          "⚠️ Could not sync saved notifications:",
-          error?.message || error,
+          "[Socket] Could not sync saved notifications:",
+          error?.response?.data?.error || error?.message || error,
         );
       }
+    };
+
+    const handleConnect = async () => {
+      console.log(`[Socket] Connected: ${socketInstance.id}`);
+
+      setIsConnected(true);
+
+      // Re-sync persisted notifications every time the
+      // socket connects or reconnects.
+      await syncNotifications();
+    };
+
+    const handleConnectError = (error) => {
+      console.error("[Socket] Connection error:", error?.message || error);
+
+      setIsConnected(false);
+    };
+
+    const handleReconnectAttempt = (attempt) => {
+      console.log(`[Socket] Reconnect attempt ${attempt}`);
     };
 
     const handleNotification = (data = {}) => {
@@ -55,33 +101,76 @@ export const useSocket = (userId = "") => {
         message:
           data.message ||
           data.notification?.message ||
-          "🔔 New Notification Received!",
+          "New Notification Received!",
       };
-      setNotifications((prev) => [notification, ...prev].slice(0, 50));
+
+      setNotifications((previous) => {
+        // Avoid duplicate notifications when a socket event
+        // arrives immediately after a server sync.
+        const notificationId =
+          notification._id ||
+          notification.id ||
+          notification.notification?._id ||
+          null;
+
+        if (
+          notificationId &&
+          previous.some(
+            (item) => item._id === notificationId || item.id === notificationId,
+          )
+        ) {
+          return previous;
+        }
+
+        return [notification, ...previous].slice(0, 50);
+      });
     };
 
-    const handleMetricsUpdate = () => {
-      // AdminDashboard listens for this browser event and immediately fetches the authoritative metrics from /api/analytics.
-      window.dispatchEvent(new Event("pulsestream:metrics-update"));
+    const handleDisconnect = (reason) => {
+      console.log(`[Socket] Disconnected: ${socketInstance.id} (${reason})`);
+
+      setIsConnected(false);
     };
 
-    const handleDisconnect = () => setIsConnected(false);
+    const handleReconnect = async (attempt) => {
+      console.log(
+        `[Socket] Reconnected after ${attempt} attempt(s): ${socketInstance.id}`,
+      );
+
+      setIsConnected(true);
+
+      // Re-sync anything that may have been emitted while
+      // the browser was disconnected.
+      await syncNotifications();
+    };
 
     socketInstance.on("connect", handleConnect);
+    socketInstance.on("connect_error", handleConnectError);
+    socketInstance.on("reconnect_attempt", handleReconnectAttempt);
+    socketInstance.on("reconnect", handleReconnect);
     socketInstance.on("notification", handleNotification);
-    socketInstance.on("metrics:update", handleMetricsUpdate);
     socketInstance.on("disconnect", handleDisconnect);
 
     setSocket(socketInstance);
 
     return () => {
+      console.log(`[Socket] Cleaning up connection for user ${userId}`);
+
       socketInstance.off("connect", handleConnect);
+      socketInstance.off("connect_error", handleConnectError);
+      socketInstance.off("reconnect_attempt", handleReconnectAttempt);
+      socketInstance.off("reconnect", handleReconnect);
       socketInstance.off("notification", handleNotification);
-      socketInstance.off("metrics:update", handleMetricsUpdate);
       socketInstance.off("disconnect", handleDisconnect);
+
       socketInstance.disconnect();
     };
   }, [userId]);
 
-  return { socket, isConnected, notifications, setNotifications };
+  return {
+    socket,
+    isConnected,
+    notifications,
+    setNotifications,
+  };
 };

@@ -3,14 +3,19 @@ import { useSocket } from "./hooks/useSocket";
 import { Navbar } from "./components/Navbar";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { UserPanel } from "./components/UserPanel";
-import { updateWatchlist, fetchCurrentUser, clearNotifications } from "./services/api";
+import {
+  updateWatchlist,
+  fetchCurrentUser,
+  clearNotifications,
+} from "./services/api";
 import { Bell, Activity } from "lucide-react";
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const userId =
+    authChecked && currentUser ? currentUser._id || currentUser.id : "";
 
-  const userId = currentUser ? currentUser._id || currentUser.id : "";
   const { isConnected, notifications, setNotifications } = useSocket(userId);
   const [activeTab, setActiveTab] = useState("consumer");
 
